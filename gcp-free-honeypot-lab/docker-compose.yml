@@ -1,0 +1,75 @@
+services:
+  honeypot:
+    build:
+      context: .
+      dockerfile: docker/honeypot.Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      HONEYPOT_ADDR: ${HONEYPOT_ADDR:-:80}
+      HONEYPOT_LOG_DIR: /var/log/honeypot
+    volumes:
+      - ./logs/honeypot:/var/log/honeypot
+
+  suricata:
+    image: jasonish/suricata:latest
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_NICE
+    volumes:
+      - ./logs/suricata:/var/log/suricata
+    command:
+      - -i
+      - ${SENSOR_INTERFACE:-eth0}
+      - -l
+      - /var/log/suricata
+      - -k
+      - none
+
+  zeek:
+    image: zeek/zeek:latest
+    restart: unless-stopped
+    network_mode: host
+    user: root
+    working_dir: /var/log/zeek
+    volumes:
+      - ./logs/zeek:/var/log/zeek
+    command:
+      - zeek
+      - -i
+      - ${SENSOR_INTERFACE:-eth0}
+      - LogAscii::use_json=T
+
+  log-shipper:
+    build:
+      context: .
+      dockerfile: docker/log-shipper.Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - honeypot
+      - suricata
+      - zeek
+    environment:
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:?set GCP_PROJECT_ID}
+      LOG_SHIPPER_POLL: ${LOG_SHIPPER_POLL:-5s}
+    volumes:
+      - ./logs:/logs:ro
+      - ./state:/var/lib/honeypot-log-shipper
+    # The log shipper accepts repeated -source flags in this shape:
+    #   -source=<event-source-name>:<file-to-tail-inside-container>:<pubsub-topic>
+    # Example:
+    #   suricata:/logs/suricata/eve.json:alerts.suricata
+    # means "tail Suricata eve.json and publish each JSON line to alerts.suricata".
+    command:
+      - -project=${GCP_PROJECT_ID}
+      - -poll=${LOG_SHIPPER_POLL:-5s}
+      - -state=/var/lib/honeypot-log-shipper/state.json
+      - -source=suricata:/logs/suricata/eve.json:${SURICATA_TOPIC:-alerts.suricata}
+      - -source=zeek.conn:/logs/zeek/conn.log:${ZEEK_TOPIC:-events.zeek}
+      - -source=zeek.http:/logs/zeek/http.log:${ZEEK_TOPIC:-events.zeek}
+      - -source=zeek.dns:/logs/zeek/dns.log:${ZEEK_TOPIC:-events.zeek}
+      - -source=honeypot.requests:/logs/honeypot/requests.jsonl:${HONEYPOT_TOPIC:-honeypot.requests}

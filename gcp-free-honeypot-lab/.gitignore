@@ -1,0 +1,27 @@
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Runtime logs and shipper offsets
+logs/
+state/
+
+# Go
+bin/
+coverage.out
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+
+# Editors and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

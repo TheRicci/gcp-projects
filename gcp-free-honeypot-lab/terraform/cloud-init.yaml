@@ -1,0 +1,53 @@
+#cloud-config
+
+# cloud-init runs once when the VM first boots.
+# Terraform renders the placeholder variables before sending this file to the VM.
+
+# Refresh apt package metadata during the first boot.
+package_update: true
+
+# Avoid full OS upgrades during bootstrap; that can make VM creation slow and noisy.
+package_upgrade: false
+
+# Base packages needed to clone/copy the project, inspect logs, and run containers.
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - jq
+  - docker.io
+
+# Write the environment file that Docker Compose will consume later.
+# The repo itself is not copied by Terraform; this only prepares VM defaults.
+write_files:
+  - path: /etc/honeypot-lab.env
+    permissions: "0644"
+    content: |
+      GCP_PROJECT_ID=${project_id}
+      SENSOR_INTERFACE=${sensor_interface}
+      SURICATA_TOPIC=${suricata_topic}
+      ZEEK_TOPIC=${zeek_topic}
+      HONEYPOT_TOPIC=${honeypot_topic}
+      NORMALIZED_TOPIC=${normalized_topic}
+      LOG_SHIPPER_POLL=5s
+
+# Commands run near the end of first boot.
+runcmd:
+  # Start Docker and enable it after reboot.
+  - systemctl enable --now docker
+
+  # Try common Compose package names. Ubuntu images can differ slightly by release.
+  - apt-get update
+  - apt-get install -y docker-compose-v2 || apt-get install -y docker-compose-plugin || apt-get install -y docker-compose || true
+
+  # Create the expected runtime directories before the Compose stack starts.
+  - mkdir -p /opt/honeypot-lab/logs/suricata /opt/honeypot-lab/logs/zeek /opt/honeypot-lab/logs/honeypot /opt/honeypot-lab/state
+
+  # Let the non-root Docker containers write logs/state through bind mounts.
+  - chmod -R 0775 /opt/honeypot-lab/logs /opt/honeypot-lab/state
+
+  # Put the rendered environment file where the runbook expects it.
+  - cp /etc/honeypot-lab.env /opt/honeypot-lab/.env
+
+  # Add the default Ubuntu user to the docker group when that user exists.
+  - usermod -aG docker ubuntu || true
