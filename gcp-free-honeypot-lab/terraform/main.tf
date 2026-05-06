@@ -9,19 +9,76 @@ locals {
     honeypot   = "honeypot.requests"
     normalized = "events.normalized"
   }
+
+  repo_root = abspath("${path.module}/..")
+
+  sensor_bundle_excludes = [
+    ".cursor",
+    ".env",
+    ".git",
+    "bin",
+    "docs",
+    "functions",
+    "logs",
+    "mcps",
+    "state",
+    "terraform",
+  ]
 }
 
-# Look up the latest Ubuntu 24.04 LTS image maintained by the Ubuntu image project.
-# This avoids hardcoding an image self-link that will age out over time.
+# Zip workspace files needed on the VM (Compose + Docker build context).
+data "archive_file" "sensor_bundle" {
+  type        = "zip"
+  output_path = "${path.module}/.terraform-bundle/honeypot-sensor-runtime.zip"
+
+  source_dir = local.repo_root
+  excludes   = local.sensor_bundle_excludes
+}
+
+resource "google_project_service" "storage_api" {
+  project                    = var.project_id
+  service                    = "storage.googleapis.com"
+  disable_dependent_services = false
+  disable_on_destroy         = false
+}
+
+# Private bucket Terraform uses to ship the Compose runtime to first-boot cloud-init on the VM.
+resource "google_storage_bucket" "sensor_deploy" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-honeypot-sensor-bundles"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = true
+
+  labels = var.labels
+
+  depends_on = [google_project_service.storage_api]
+}
+
+# VM reads only this single object identity via IAM; no anonymous access is required or recommended.
+resource "google_storage_bucket_iam_member" "vm_sensor_bundle_reader" {
+  bucket = google_storage_bucket.sensor_deploy.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.vm.email}"
+}
+
+resource "google_storage_bucket_object" "sensor_bundle" {
+  name   = var.sensor_bundle_object_key
+  bucket = google_storage_bucket.sensor_deploy.name
+  source = data.archive_file.sensor_bundle.output_path
+}
+
+# Look up the latest Ubuntu 24.04 LTS (amd64) image from ubuntu-os-cloud.
+# Family ubuntu-2404-lts-amd64 tracks current LTS builds; avoids a hardcoded image self-link.
 data "google_compute_image" "ubuntu" {
-  family = "ubuntu-2404-lts"
+  family  = "ubuntu-2404-lts-amd64"
   project = "ubuntu-os-cloud"
 }
 
 # Private VPC for the lab VM. Using a dedicated network keeps the lab isolated
 # from any default network that may already exist in the project.
 resource "google_compute_network" "lab" {
-  name = local.network_name
+  name                    = local.network_name
   auto_create_subnetworks = false
 }
 
@@ -176,10 +233,12 @@ resource "google_compute_instance" "sensor" {
       sensor_interface = var.sensor_interface
 
       # Topic names passed to Docker Compose through the generated .env file.
-      suricata_topic   = local.topic_names.suricata
-      zeek_topic       = local.topic_names.zeek
-      honeypot_topic   = local.topic_names.honeypot
-      normalized_topic = local.topic_names.normalized
+      suricata_topic     = local.topic_names.suricata
+      zeek_topic         = local.topic_names.zeek
+      honeypot_topic     = local.topic_names.honeypot
+      normalized_topic   = local.topic_names.normalized
+      bundle_bucket      = google_storage_bucket.sensor_deploy.name
+      bundle_object_name = google_storage_bucket_object.sensor_bundle.name
     })
   }
 
@@ -192,10 +251,12 @@ resource "google_compute_instance" "sensor" {
     scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 
-  # Make dependencies explicit so the VM starts only after its identity and topics exist.
+  # Bundle object and read IAM must exist before first boot pulls the artifact from Cloud Storage.
   depends_on = [
     google_project_iam_member.vm_pubsub_publisher,
     google_project_iam_member.vm_log_writer,
     google_pubsub_topic.pipeline,
+    google_storage_bucket_iam_member.vm_sensor_bundle_reader,
+    google_storage_bucket_object.sensor_bundle,
   ]
 }

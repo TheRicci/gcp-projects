@@ -11,6 +11,9 @@ state/
 bin/
 coverage.out
 
+# Terraform bundle cache (Terraform upload artifact; not tracked)
+terraform/.terraform-bundle/
+
 # Terraform
 **/.terraform/
 *.tfstate

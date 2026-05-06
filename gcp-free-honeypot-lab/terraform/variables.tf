@@ -88,3 +88,10 @@ variable "labels" {
     env = "dev"
   }
 }
+
+# Object key for the zipped sensor runtime uploaded on each Terraform apply that changes the archive.
+variable "sensor_bundle_object_key" {
+  description = "Cloud Storage object name (may include slashes) for the zipped sensor Docker/Compose snapshot."
+  type        = string
+  default     = "sensor-bundle/latest.zip"
+}

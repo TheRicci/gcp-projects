@@ -13,6 +13,12 @@ terraform {
       # Allow current major versions 5 and 6, while avoiding an automatic jump to 7.
       version = ">= 5.0, < 7.0"
     }
+
+    # Builds the zip artifact uploaded to Cloud Storage before the VM boots.
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
   }
 }
 

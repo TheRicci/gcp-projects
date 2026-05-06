@@ -31,3 +31,9 @@ output "pubsub_topics" {
     for name, topic in google_pubsub_topic.pipeline : name => topic.id
   }
 }
+
+# Where Terraform stages the zipped sensor runtime for first-boot bootstrap on the VM.
+output "sensor_runtime_bundle_gs_uri" {
+  description = "GCS object URI Terraform uploads whenever the zipped workspace artifact changes (cloud-init fetches this on first boot)."
+  value       = "gs://${google_storage_bucket.sensor_deploy.name}/${google_storage_bucket_object.sensor_bundle.name}"
+}

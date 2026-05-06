@@ -9,16 +9,13 @@ package_update: true
 # Avoid full OS upgrades during bootstrap; that can make VM creation slow and noisy.
 package_upgrade: false
 
-# Base packages needed to clone/copy the project, inspect logs, and run containers.
 packages:
   - ca-certificates
   - curl
-  - git
   - jq
+  - unzip
   - docker.io
 
-# Write the environment file that Docker Compose will consume later.
-# The repo itself is not copied by Terraform; this only prepares VM defaults.
 write_files:
   - path: /etc/honeypot-lab.env
     permissions: "0644"
@@ -31,23 +28,49 @@ write_files:
       NORMALIZED_TOPIC=${normalized_topic}
       LOG_SHIPPER_POLL=5s
 
-# Commands run near the end of first boot.
-runcmd:
-  # Start Docker and enable it after reboot.
-  - systemctl enable --now docker
+  - path: /usr/local/sbin/honeypot-lab-bootstrap-app.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
 
-  # Try common Compose package names. Ubuntu images can differ slightly by release.
+      DEST=/opt/honeypot-lab
+      TMP=/tmp/honeypot-sensor-runtime.zip
+      BUCKET="${bundle_bucket}"
+      OBJECT="${bundle_object_name}"
+
+      install -d -m 0775 "$${DEST}"
+
+      TOKEN=$$(curl -sf -H "Metadata-Flavor: Google" \\
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \\
+        | jq -r .access_token)
+
+      ENC_OBJECT=$$(jq -rn --arg o "$${OBJECT}" '$$o|@uri')
+
+      curl -sf -H "Authorization: Bearer $${TOKEN}" \\
+        "https://storage.googleapis.com/storage/v1/b/$${BUCKET}/o/$${ENC_OBJECT}?alt=media" \\
+        -o "$${TMP}"
+
+      unzip -oq "$${TMP}" -d "$${DEST}"
+
+      rm -f "$${TMP}"
+
+      cp /etc/honeypot-lab.env "$${DEST}/.env"
+
+      cd "$${DEST}"
+
+      docker compose up -d --build || docker-compose up -d --build
+
+runcmd:
+  - systemctl enable --now docker
   - apt-get update
   - apt-get install -y docker-compose-v2 || apt-get install -y docker-compose-plugin || apt-get install -y docker-compose || true
 
-  # Create the expected runtime directories before the Compose stack starts.
+  # Layout expected by Compose bind mounts before the artifact overwrites sibling paths.
   - mkdir -p /opt/honeypot-lab/logs/suricata /opt/honeypot-lab/logs/zeek /opt/honeypot-lab/logs/honeypot /opt/honeypot-lab/state
 
-  # Let the non-root Docker containers write logs/state through bind mounts.
   - chmod -R 0775 /opt/honeypot-lab/logs /opt/honeypot-lab/state
 
-  # Put the rendered environment file where the runbook expects it.
-  - cp /etc/honeypot-lab.env /opt/honeypot-lab/.env
+  - /usr/local/sbin/honeypot-lab-bootstrap-app.sh
 
-  # Add the default Ubuntu user to the docker group when that user exists.
   - usermod -aG docker ubuntu || true
