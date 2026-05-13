@@ -1,0 +1,64 @@
+#cloud-config
+#
+# Terraform renders this file and passes it as instance metadata `user-data`.
+# cloud-init applies it on first boot (same pattern as gcp-free-honeypot-lab).
+
+package_update: true
+package_upgrade: false
+
+packages:
+  - ca-certificates
+  - curl
+  - jq
+  - unzip
+  - docker.io
+
+write_files:
+  - path: /etc/threat-central.env
+    permissions: "0644"
+    content: |
+      GCP_PROJECT_ID=${project_id}
+      FIRESTORE_COLLECTION=${firestore_collection}
+      FIRESTORE_BOOTSTRAP_LIMIT=${bootstrap_limit}
+      RECEIVER_ADDR=:8080
+      METRICS_ADDR=:2112
+
+  - path: /usr/local/sbin/threat-central-bootstrap-app.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      DEST=/opt/threat-central
+      TMP=/tmp/threat-central-runtime.zip
+      BUCKET="${bundle_bucket}"
+      OBJECT="${bundle_object_name}"
+
+      install -d -m 0755 "$${DEST}"
+
+      TOKEN=$$(curl -sf -H "Metadata-Flavor: Google" \\
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \\
+        | jq -r .access_token)
+
+      ENC_OBJECT=$$(jq -rn --arg o "$${OBJECT}" '$$o|@uri')
+
+      curl -sf -H "Authorization: Bearer $${TOKEN}" \\
+        "https://storage.googleapis.com/storage/v1/b/$${BUCKET}/o/$${ENC_OBJECT}?alt=media" \\
+        -o "$${TMP}"
+
+      unzip -oq "$${TMP}" -d "$${DEST}"
+
+      rm -f "$${TMP}"
+
+      cp /etc/threat-central.env "$${DEST}/.env"
+
+      cd "$${DEST}"
+
+      docker compose up -d --build || docker-compose up -d --build
+
+runcmd:
+  - systemctl enable --now docker
+  - apt-get update
+  - apt-get install -y docker-compose-v2 || apt-get install -y docker-compose-plugin || apt-get install -y docker-compose || true
+  - /usr/local/sbin/threat-central-bootstrap-app.sh
+  - usermod -aG docker ubuntu || true

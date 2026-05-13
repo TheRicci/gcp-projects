@@ -1,0 +1,218 @@
+{
+  "title": "Threat Central",
+  "uid": "threat-central-main",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Alerts in Range",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 200 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        { "expr": "sum(increase(threat_central_alerts_total[$__range]))", "legendFormat": "Total" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Unique Source IPs",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "orange", "value": 20 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        { "expr": "threat_central_unique_ips", "legendFormat": "IPs" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Active Alert Groups",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        }
+      },
+      "targets": [
+        { "expr": "sum(threat_central_alerts_by_source)", "legendFormat": "Groups" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Storage Errors",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        { "expr": "threat_central_storage_write_errors_total", "legendFormat": "Errors" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Alert Rate by Source",
+      "gridPos": { "x": 0, "y": 4, "w": 16, "h": 8 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (log_type) (rate(threat_central_alerts_total[5m]))",
+          "legendFormat": "{{ log_type }}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "piechart",
+      "title": "Alerts by Source",
+      "gridPos": { "x": 16, "y": 4, "w": 8, "h": 8 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "right" },
+        "pieType": "donut"
+      },
+      "targets": [
+        {
+          "expr": "sum by (log_type) (increase(threat_central_alerts_total[$__range]))",
+          "legendFormat": "{{ log_type }}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Alerts by Tier",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 15 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (tier) (rate(threat_central_tier_total[5m]))",
+          "legendFormat": "Tier {{ tier }}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "bargauge",
+      "title": "Severity Distribution",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "displayMode": "gradient"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "continuous-GrYlRd" },
+          "min": 0
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (severity) (increase(threat_central_severity_total[$__range]))",
+          "legendFormat": "Severity {{ severity }}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Active Alert Groups by Source",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 7 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 5, "spanNulls": true }
+        }
+      },
+      "targets": [
+        {
+          "expr": "threat_central_alerts_by_source",
+          "legendFormat": "{{ log_type }}"
+        }
+      ]
+    }
+  ]
+}
