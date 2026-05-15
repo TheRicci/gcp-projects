@@ -13,6 +13,7 @@ packages:
   - ca-certificates
   - curl
   - jq
+  - python3
   - unzip
   - docker.io
 
@@ -41,15 +42,12 @@ write_files:
 
       install -d -m 0775 "$${DEST}"
 
-      TOKEN=$$(curl -sf -H "Metadata-Flavor: Google" \\
-        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \\
-        | jq -r .access_token)
+      # Backticks avoid "$$" + "(" — if "$$" is literal, bash treats it as PID and errors before "(".
+      TOKEN=`curl -sf -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" | jq -r .access_token`
 
-      ENC_OBJECT=$$(jq -rn --arg o "$${OBJECT}" '$$o|@uri')
+      ENC_OBJECT=`python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$${OBJECT}"`
 
-      curl -sf -H "Authorization: Bearer $${TOKEN}" \\
-        "https://storage.googleapis.com/storage/v1/b/$${BUCKET}/o/$${ENC_OBJECT}?alt=media" \\
-        -o "$${TMP}"
+      curl -sf -H "Authorization: Bearer $${TOKEN}" "https://storage.googleapis.com/storage/v1/b/$${BUCKET}/o/$${ENC_OBJECT}?alt=media" -o "$${TMP}"
 
       unzip -oq "$${TMP}" -d "$${DEST}"
 

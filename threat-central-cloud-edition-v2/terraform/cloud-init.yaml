@@ -10,6 +10,7 @@ packages:
   - ca-certificates
   - curl
   - jq
+  - python3
   - unzip
   - docker.io
 
@@ -36,15 +37,13 @@ write_files:
 
       install -d -m 0755 "$${DEST}"
 
-      TOKEN=$$(curl -sf -H "Metadata-Flavor: Google" \\
-        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \\
-        | jq -r .access_token)
+      # Use backticks (not $(...)) so a literal "$$" never reaches bash — "$$" is the shell PID and breaks before "(".
+      TOKEN=`curl -sf -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" | jq -r .access_token`
 
-      ENC_OBJECT=$$(jq -rn --arg o "$${OBJECT}" '$$o|@uri')
+      # URL-encode object path (avoid jq '$o|@uri' — Terraform/cloud-init can leave '$$' in the file and jq errors).
+      ENC_OBJECT=`python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$${OBJECT}"`
 
-      curl -sf -H "Authorization: Bearer $${TOKEN}" \\
-        "https://storage.googleapis.com/storage/v1/b/$${BUCKET}/o/$${ENC_OBJECT}?alt=media" \\
-        -o "$${TMP}"
+      curl -sf -H "Authorization: Bearer $${TOKEN}" "https://storage.googleapis.com/storage/v1/b/$${BUCKET}/o/$${ENC_OBJECT}?alt=media" -o "$${TMP}"
 
       unzip -oq "$${TMP}" -d "$${DEST}"
 
@@ -56,9 +55,59 @@ write_files:
 
       docker compose up -d --build || docker-compose up -d --build
 
+  # OS Login users live under /home/<name>, not necessarily "ubuntu".
+  - path: /usr/local/sbin/threat-central-docker-group.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      for d in /home/*; do
+        [ -d "$d" ] || continue
+        u=$(basename "$d")
+        id "$u" &>/dev/null && usermod -aG docker "$u" || true
+      done
+      usermod -aG docker ubuntu 2>/dev/null || true
+
+  # OS Login often creates /home/<user> on first SSH, after cloud-init. Re-run docker-group when /home changes.
+  - path: /etc/systemd/system/threat-central-docker-group.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Add all users under /home/* to the docker group (OS Login homes appear after first SSH)
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/threat-central-docker-group.sh
+
+  - path: /etc/systemd/system/threat-central-docker-group.path
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Watch /home for new OS Login home directories
+      [Path]
+      PathChanged=/home
+      Unit=threat-central-docker-group.service
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/threat-central-docker-group.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Retry docker group membership after OS Login may have created homes
+      [Timer]
+      OnBootSec=2min
+      OnBootSec=10min
+      Unit=threat-central-docker-group.service
+      [Install]
+      WantedBy=timers.target
+
 runcmd:
   - systemctl enable --now docker
   - apt-get update
   - apt-get install -y docker-compose-v2 || apt-get install -y docker-compose-plugin || apt-get install -y docker-compose || true
+  # Add OS Login users to docker before bootstrap so a failed pull does not skip group membership.
+  - /usr/local/sbin/threat-central-docker-group.sh
   - /usr/local/sbin/threat-central-bootstrap-app.sh
-  - usermod -aG docker ubuntu || true
+  - systemctl daemon-reload
+  - systemctl enable --now threat-central-docker-group.path
+  - systemctl enable --now threat-central-docker-group.timer
