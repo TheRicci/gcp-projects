@@ -72,6 +72,40 @@ curl -X POST http://localhost:8080/logs \
   }]'
 ```
 
+## Simulate traffic (Firestore + Prometheus + Grafana)
+
+Use the bundled scripts to POST realistic **Suricata**, **ModSecurity**, and **Wazuh** JSON to `/logs`. Each event is normalized, written to Firestore, and reflected in Prometheus counters/gauges (scraped every ~10s).
+
+**On the VM** (after `terraform apply` / cloud-init):
+
+```bash
+chmod +x /opt/threat-central/scripts/simulate-alerts.sh
+/opt/threat-central/scripts/simulate-alerts.sh --count 30 --interval 0.5
+```
+
+**From your laptop** (replace with `terraform output -raw vm_external_ip` if port 8080 is allowed):
+
+```powershell
+cd threat-central-cloud-edition-v2
+.\scripts\simulate-alerts.ps1 -BaseUrl "http://VM_IP:8080" -Count 50
+```
+
+```bash
+BASE_URL=http://VM_IP:8080 ./scripts/simulate-alerts.sh --count 50 --burst
+```
+
+Useful flags: `--sources suricata,wazuh`, `--burst` (no delay), `--dry-run` (print JSON only).
+
+**Verify:**
+
+```bash
+curl -sS http://127.0.0.1:2112/metrics | grep threat_central_
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/health
+```
+
+- Grafana: `http://VM_IP:3000` (dashboard updates after Prometheus scrapes)
+- Firestore: GCP console → your project → `alerts` collection
+
 Prometheus should then scrape metrics such as:
 
 - `threat_central_alerts_total`
